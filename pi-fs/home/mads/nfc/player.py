@@ -11,7 +11,7 @@ from adafruit_pn532.i2c import PN532_I2C
 
 HERE = Path(__file__).parent
 MAPPING_PATH = HERE / "mapping.json"
-PLAYER_CMD = ["mpg123", "-q"]
+PLAYER_CMD = ["mpg123", "-o", "alsa", "-a", "default", "-q"]
 MISS_TOLERANCE = 3
 
 def init_pn532(i2c, attempts=3):
