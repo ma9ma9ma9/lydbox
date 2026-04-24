@@ -14,6 +14,8 @@ HERE = Path(__file__).parent
 MAPPING_PATH = HERE / "mapping.json"
 CTL_FIFO = "/tmp/lydbox.ctl"
 MISS_TOLERANCE = 3
+POLL_TIMEOUT = 0.1
+IDLE_SLEEP = 0.2
 
 def init_pn532(i2c, attempts=3):
     last = None
@@ -84,8 +86,9 @@ def main():
                     paused = not paused
                     print("paused" if paused else "resumed", flush=True)
 
-            uid = pn.read_passive_target(timeout=0.3)
+            uid = pn.read_passive_target(timeout=POLL_TIMEOUT)
             seen = uid_hex(uid) if uid else None
+            time.sleep(IDLE_SLEEP)
 
             if seen is not None and seen == held_uid:
                 misses = 0
