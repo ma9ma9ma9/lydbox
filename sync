@@ -10,6 +10,7 @@ SYSTEM_FILES=(
 )
 USER_FILES=(
   "home/mads/volume-knob/encoder.py"
+  "home/mads/nfc/read_uid.py"
 )
 
 usage() {
@@ -71,9 +72,10 @@ case "$cmd" in
     ;;
   config)
     sub="${2:-}"
+    f="boot/firmware/config.txt"
     case "$sub" in
-      pull) xfer pull "boot/firmware/config.txt" sudo ;;
-      push) xfer push "boot/firmware/config.txt" sudo; echo "reboot the Pi for changes to take effect" ;;
+      pull) rsync -tz --rsync-path="sudo rsync" "$HOST:/$f" "$DIR/$f"; echo "  pull $f" ;;
+      push) rsync -tz --no-perms --no-owner --no-group --rsync-path="sudo rsync" "$DIR/$f" "$HOST:/$f"; echo "  push $f"; echo "reboot the Pi for changes to take effect" ;;
       *) echo "usage: $0 config {pull|push}" >&2; exit 2 ;;
     esac
     ;;
