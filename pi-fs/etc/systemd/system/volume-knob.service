@@ -1,0 +1,15 @@
+[Unit]
+Description=KY-040 volume knob for lydbox
+After=sound.target
+
+[Service]
+Environment=GPIOZERO_PIN_FACTORY=lgpio
+Type=simple
+User=mads
+WorkingDirectory=/tmp
+ExecStart=/usr/bin/python3 /home/mads/volume-knob/encoder.py
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

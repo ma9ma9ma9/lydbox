@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+HOST="mads@lydbox.local"
+DIR="$(cd "$(dirname "$0")" && pwd)/pi-fs"
+
+SYSTEM_FILES=(
+  "etc/asound.conf"
+  "etc/systemd/system/volume-knob.service"
+)
+USER_FILES=(
+  "home/mads/volume-knob/encoder.py"
+)
+
+usage() {
+  cat <<EOF
+usage: $0 <command>
+
+  pull      copy files from Pi -> local pi-fs/
+  push      copy files from local pi-fs/ -> Pi
+  deploy    push, then reload & restart volume-knob.service
+  diff      show local-vs-Pi differences (no changes)
+  config    sync boot/firmware/config.txt (reboot required after push)
+EOF
+}
+
+xfer() {
+  local dir="$1" file="$2" with_sudo="$3"
+  local local_path="$DIR/$file"
+  local remote_path="/$file"
+  local rsync_path=()
+  [[ "$with_sudo" == "sudo" ]] && rsync_path=(--rsync-path="sudo rsync")
+  if [[ "$dir" == "push" ]]; then
+    rsync -az "${rsync_path[@]}" "$local_path" "$HOST:$remote_path"
+    echo "  push $file"
+  else
+    rsync -az "${rsync_path[@]}" "$HOST:$remote_path" "$local_path"
+    echo "  pull $file"
+  fi
+}
+
+diff_file() {
+  local file="$1" with_sudo="$2"
+  local rsync_path=()
+  [[ "$with_sudo" == "sudo" ]] && rsync_path=(--rsync-path="sudo rsync")
+  local out=""
+  out=$(rsync -an --checksum --out-format='%n' "${rsync_path[@]}" "$DIR/$file" "$HOST:/$file" 2>/dev/null || true)
+  if [[ -n "$out" ]]; then
+    echo "  drift: $file"
+  fi
+}
+
+cmd="${1:-}"
+case "$cmd" in
+  pull)
+    for f in "${SYSTEM_FILES[@]}"; do xfer pull "$f" sudo; done
+    for f in "${USER_FILES[@]}"; do xfer pull "$f" user; done
+    ;;
+  push)
+    for f in "${SYSTEM_FILES[@]}"; do xfer push "$f" sudo; done
+    for f in "${USER_FILES[@]}"; do xfer push "$f" user; done
+    ;;
+  deploy)
+    "$0" push
+    ssh "$HOST" "sudo systemctl daemon-reload && sudo systemctl restart volume-knob.service && sleep 1 && systemctl status volume-knob.service --no-pager -l | head -12"
+    ;;
+  diff)
+    for f in "${SYSTEM_FILES[@]}"; do diff_file "$f" sudo; done
+    for f in "${USER_FILES[@]}"; do diff_file "$f" user; done
+    echo "(empty output = in sync)"
+    ;;
+  config)
+    sub="${2:-}"
+    case "$sub" in
+      pull) xfer pull "boot/firmware/config.txt" sudo ;;
+      push) xfer push "boot/firmware/config.txt" sudo; echo "reboot the Pi for changes to take effect" ;;
+      *) echo "usage: $0 config {pull|push}" >&2; exit 2 ;;
+    esac
+    ;;
+  *) usage; exit 2 ;;
+esac
