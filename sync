@@ -11,6 +11,8 @@ SYSTEM_FILES=(
 USER_FILES=(
   "home/mads/volume-knob/encoder.py"
   "home/mads/nfc/read_uid.py"
+  "home/mads/nfc/player.py"
+  "home/mads/nfc/mapping.json"
 )
 
 usage() {
