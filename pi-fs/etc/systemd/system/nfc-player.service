@@ -1,0 +1,14 @@
+[Unit]
+Description=NFC-triggered MP3 player for lydbox
+After=sound.target
+
+[Service]
+Type=simple
+User=mads
+WorkingDirectory=/tmp
+ExecStart=/home/mads/lydbox-venv/bin/python /home/mads/nfc/player.py
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""NFC-triggered MP3 player. Reads UIDs from PN532, plays mapped file via mpg123."""
+"""NFC-triggered MP3 player. Persistent mpg123 -R keeps ALSA open so pause doesn't click."""
 import json
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -11,7 +12,7 @@ from adafruit_pn532.i2c import PN532_I2C
 
 HERE = Path(__file__).parent
 MAPPING_PATH = HERE / "mapping.json"
-PLAYER_CMD = ["mpg123", "-o", "alsa", "-a", "default", "-q"]
+CTL_FIFO = "/tmp/lydbox.ctl"
 MISS_TOLERANCE = 3
 
 def init_pn532(i2c, attempts=3):
@@ -29,57 +30,112 @@ def init_pn532(i2c, attempts=3):
 def uid_hex(uid):
     return "".join(f"{b:02X}" for b in uid)
 
-def stop(proc):
-    if not proc or proc.poll() is not None:
-        return
-    proc.terminate()
+def start_mpg123():
+    return subprocess.Popen(
+        ["mpg123", "-R", "-o", "alsa", "-a", "default"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+
+def send(mpg, cmd):
+    if mpg.poll() is None and mpg.stdin:
+        try:
+            mpg.stdin.write(cmd + "\n")
+            mpg.stdin.flush()
+        except BrokenPipeError:
+            pass
+
+def setup_fifo():
     try:
-        proc.wait(1)
-    except subprocess.TimeoutExpired:
-        proc.kill()
+        os.mkfifo(CTL_FIFO, 0o660)
+    except FileExistsError:
+        pass
+    return os.open(CTL_FIFO, os.O_RDWR | os.O_NONBLOCK)
+
+def drain_fifo(fd):
+    try:
+        data = os.read(fd, 4096)
+    except BlockingIOError:
+        return []
+    if not data:
+        return []
+    return [c.strip() for c in data.decode(errors="ignore").split("\n") if c.strip()]
 
 def main():
     i2c = busio.I2C(board.SCL, board.SDA)
     pn = init_pn532(i2c)
     mapping = json.loads(MAPPING_PATH.read_text()) if MAPPING_PATH.exists() else {}
-    print(f"loaded {len(mapping)} UID mapping(s)", flush=True)
+    mpg = start_mpg123()
+    ctl_fd = setup_fifo()
+    print(f"loaded {len(mapping)} UID(s), mpg123 pid={mpg.pid}, ctl={CTL_FIFO}", flush=True)
 
-    held = None
+    loaded_uid = None
+    held_uid = None
+    paused = False
     misses = 0
-    proc = None
 
-    while True:
-        uid = pn.read_passive_target(timeout=0.3)
-        seen = uid_hex(uid) if uid else None
+    try:
+        while True:
+            for cmd in drain_fifo(ctl_fd):
+                if cmd == "pause" and loaded_uid is not None:
+                    send(mpg, "P")
+                    paused = not paused
+                    print("paused" if paused else "resumed", flush=True)
 
-        if seen is not None and seen == held:
-            misses = 0
-            continue
+            uid = pn.read_passive_target(timeout=0.3)
+            seen = uid_hex(uid) if uid else None
 
-        if seen is None:
-            misses += 1
-            if misses < MISS_TOLERANCE:
+            if seen is not None and seen == held_uid:
+                misses = 0
                 continue
-            if held is not None:
-                print("released", flush=True)
-                stop(proc)
-                proc = None
-                held = None
-            continue
 
-        misses = 0
-        if held is not None:
-            stop(proc)
-            proc = None
-        held = seen
-        path = mapping.get(seen)
-        if path and Path(path).is_file():
-            print(f"playing {seen}: {path}", flush=True)
-            proc = subprocess.Popen(PLAYER_CMD + [path])
-        elif path:
-            print(f"mapped but missing file: {path}", flush=True)
-        else:
-            print(f"no mapping for {seen}", flush=True)
+            if seen is None:
+                misses += 1
+                if misses < MISS_TOLERANCE:
+                    continue
+                if held_uid is not None:
+                    print("released", flush=True)
+                    held_uid = None
+                    if loaded_uid is not None and not paused:
+                        send(mpg, "P")
+                        paused = True
+                continue
+
+            misses = 0
+
+            if seen == loaded_uid:
+                held_uid = seen
+                if paused:
+                    send(mpg, "P")
+                    paused = False
+                    print(f"resumed {seen}", flush=True)
+                continue
+
+            held_uid = seen
+            path = mapping.get(seen)
+            if path and Path(path).is_file():
+                if paused:
+                    send(mpg, "P")
+                    paused = False
+                send(mpg, f"LOAD {path}")
+                loaded_uid = seen
+                print(f"playing {seen}: {path}", flush=True)
+            else:
+                if paused:
+                    send(mpg, "P")
+                    paused = False
+                send(mpg, "S")
+                loaded_uid = None
+                msg = f"missing file: {path}" if path else f"no mapping for {seen}"
+                print(msg, flush=True)
+    finally:
+        send(mpg, "Q")
+        try:
+            mpg.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            mpg.kill()
 
 if __name__ == "__main__":
     try:
