@@ -79,10 +79,10 @@ case "$cmd" in
     ;;
   config)
     sub="${2:-}"
-    f="boot/firmware/config.txt"
+    files=("boot/firmware/config.txt" "boot/firmware/cmdline.txt")
     case "$sub" in
-      pull) rsync -tz --rsync-path="sudo rsync" "$HOST:/$f" "$DIR/$f"; echo "  pull $f" ;;
-      push) rsync -tz --no-perms --no-owner --no-group --rsync-path="sudo rsync" "$DIR/$f" "$HOST:/$f"; echo "  push $f"; echo "reboot the Pi for changes to take effect" ;;
+      pull) for f in "${files[@]}"; do rsync -tz --rsync-path="sudo rsync" "$HOST:/$f" "$DIR/$f"; echo "  pull $f"; done ;;
+      push) for f in "${files[@]}"; do rsync -tz --no-perms --no-owner --no-group --rsync-path="sudo rsync" "$DIR/$f" "$HOST:/$f"; echo "  push $f"; done; echo "reboot the Pi for changes to take effect" ;;
       *) echo "usage: $0 config {pull|push}" >&2; exit 2 ;;
     esac
     ;;

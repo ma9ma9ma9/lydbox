@@ -6,9 +6,8 @@ import subprocess
 import time
 from pathlib import Path
 
-import board
-import busio
-from adafruit_pn532.i2c import PN532_I2C
+import serial
+from adafruit_pn532.uart import PN532_UART
 
 HERE = Path(__file__).parent
 MAPPING_PATH = HERE / "mapping.json"
@@ -16,12 +15,14 @@ CTL_FIFO = "/tmp/lydbox.ctl"
 MISS_TOLERANCE = 3
 POLL_TIMEOUT = 0.1
 IDLE_SLEEP = 0.2
+UART_DEV = "/dev/serial0"
+UART_BAUD = 115200
 
-def init_pn532(i2c, attempts=3):
+def init_pn532(uart, attempts=3):
     last = None
     for _ in range(attempts):
         try:
-            pn = PN532_I2C(i2c, debug=False)
+            pn = PN532_UART(uart, debug=False)
             pn.SAM_configuration()
             return pn
         except RuntimeError as e:
@@ -66,8 +67,8 @@ def drain_fifo(fd):
     return [c.strip() for c in data.decode(errors="ignore").split("\n") if c.strip()]
 
 def main():
-    i2c = busio.I2C(board.SCL, board.SDA)
-    pn = init_pn532(i2c)
+    uart = serial.Serial(UART_DEV, baudrate=UART_BAUD, timeout=1)
+    pn = init_pn532(uart)
     mapping = json.loads(MAPPING_PATH.read_text()) if MAPPING_PATH.exists() else {}
     mpg = start_mpg123()
     ctl_fd = setup_fifo()
