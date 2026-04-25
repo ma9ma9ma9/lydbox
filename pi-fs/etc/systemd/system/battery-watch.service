@@ -1,0 +1,7 @@
+[Unit]
+Description=Check UPS HAT battery and shut down if low
+ConditionPathExists=/dev/i2c-1
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /home/mads/battery-watch/watch.py

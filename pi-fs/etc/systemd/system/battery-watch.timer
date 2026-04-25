@@ -1,0 +1,10 @@
+[Unit]
+Description=Run battery-watch periodically
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=30s
+Unit=battery-watch.service
+
+[Install]
+WantedBy=timers.target

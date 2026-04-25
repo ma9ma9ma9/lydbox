@@ -8,12 +8,16 @@ SYSTEM_FILES=(
   "etc/asound.conf"
   "etc/systemd/system/volume-knob.service"
   "etc/systemd/system/nfc-player.service"
+  "etc/systemd/system/battery-watch.service"
+  "etc/systemd/system/battery-watch.timer"
+  "etc/systemd/journald.conf.d/persistent.conf"
 )
 USER_FILES=(
   "home/mads/volume-knob/encoder.py"
   "home/mads/nfc/read_uid.py"
   "home/mads/nfc/player.py"
   "home/mads/nfc/mapping.json"
+  "home/mads/battery-watch/watch.py"
 )
 
 usage() {
