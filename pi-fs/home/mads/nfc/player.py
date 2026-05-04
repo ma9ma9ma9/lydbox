@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """NFC-triggered MP3 player. Persistent mpg123 -R keeps ALSA open so pause doesn't click."""
 import json
+import math
 import os
+import struct
 import subprocess
+import threading
 import time
+import wave
 from pathlib import Path
 
 import serial
@@ -11,6 +15,7 @@ from adafruit_pn532.uart import PN532_UART
 
 HERE = Path(__file__).parent
 MAPPING_PATH = HERE / "mapping.json"
+ACK_PATH = HERE / "ack.wav"
 CTL_FIFO = "/tmp/lydbox.ctl"
 MISS_TOLERANCE = 3
 POLL_TIMEOUT = 0.1
@@ -50,6 +55,31 @@ def send(mpg, cmd):
         except BrokenPipeError:
             pass
 
+def generate_ack_wav(path):
+    sample_rate = 22050
+    notes = [(880, 0.08), (1175, 0.12)]  # A5 -> D6, brief ascending chime
+    frames = bytearray()
+    for freq, dur in notes:
+        n = int(sample_rate * dur)
+        for i in range(n):
+            t = i / sample_rate
+            env = math.sin(math.pi * t / dur)
+            val = int(0.4 * 32767 * env * math.sin(2 * math.pi * freq * t))
+            frames += struct.pack("<h", val)
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(sample_rate)
+        w.writeframes(bytes(frames))
+
+def play_ack():
+    threading.Thread(
+        target=subprocess.run,
+        args=(["aplay", "-q", "-D", "default", str(ACK_PATH)],),
+        kwargs={"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL},
+        daemon=True,
+    ).start()
+
 def setup_fifo():
     try:
         os.mkfifo(CTL_FIFO, 0o660)
@@ -70,6 +100,8 @@ def main():
     uart = serial.Serial(UART_DEV, baudrate=UART_BAUD, timeout=1)
     pn = init_pn532(uart)
     mapping = json.loads(MAPPING_PATH.read_text()) if MAPPING_PATH.exists() else {}
+    if not ACK_PATH.exists():
+        generate_ack_wav(ACK_PATH)
     mpg = start_mpg123()
     ctl_fd = setup_fifo()
     print(f"loaded {len(mapping)} UID(s), mpg123 pid={mpg.pid}, ctl={CTL_FIFO}", flush=True)
@@ -82,10 +114,14 @@ def main():
     try:
         while True:
             for cmd in drain_fifo(ctl_fd):
-                if cmd == "pause" and loaded_uid is not None:
-                    send(mpg, "P")
-                    paused = not paused
-                    print("paused" if paused else "resumed", flush=True)
+                if cmd == "pause":
+                    if loaded_uid is not None:
+                        send(mpg, "P")
+                        paused = not paused
+                        print("paused" if paused else "resumed", flush=True)
+                    else:
+                        play_ack()
+                        print("ack", flush=True)
 
             uid = pn.read_passive_target(timeout=POLL_TIMEOUT)
             seen = uid_hex(uid) if uid else None
